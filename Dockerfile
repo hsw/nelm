@@ -7,11 +7,12 @@ ARG TARGETARCH
 WORKDIR /tmp
 
 RUN apk add --no-cache curl gnupg \
-    && curl -sSLO "https://tuf.nelm.sh/targets/releases/${NELM_VERSION}/linux-${TARGETARCH}/bin/nelm" \
+    && curl -fsSLO "https://tuf.nelm.sh/targets/releases/${NELM_VERSION}/linux-${TARGETARCH}/bin/nelm" \
     -O "https://tuf.nelm.sh/targets/signatures/${NELM_VERSION}/linux-${TARGETARCH}/bin/nelm.sig" \
-    && curl -sSL https://raw.githubusercontent.com/werf/nelm/refs/heads/main/nelm.asc | gpg --import \
+    && curl -fsSL https://raw.githubusercontent.com/werf/nelm/refs/heads/main/nelm.asc | gpg --import \
     && gpg --verify nelm.sig nelm \
-    && chmod +x nelm
+    && chmod +x nelm \
+    && ./nelm --version  # Smoke test
 
 FROM alpine:3
 
