@@ -12,7 +12,7 @@ RUN apk add --no-cache curl gnupg \
     && curl -fsSL https://raw.githubusercontent.com/werf/nelm/refs/heads/main/nelm.asc | gpg --import \
     && gpg --verify nelm.sig nelm \
     && chmod +x nelm \
-    && ./nelm --version  # Smoke test
+    && ./nelm version  # Smoke test
 
 FROM alpine:3
 
