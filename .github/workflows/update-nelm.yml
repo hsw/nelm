@@ -1,0 +1,117 @@
+name: Update NELM Version
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.create-pr.outputs.pull-request-number }}
+      updated: ${{ steps.update.outputs.updated }}
+      new-version: ${{ steps.update.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest NELM release
+        id: latest-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const response = await github.rest.repos.getLatestRelease({
+                owner: 'werf',
+                repo: 'nelm'
+              });
+              const latestVersion = response.data.tag_name.replace(/^v/, '');
+              return latestVersion;
+            } catch (error) {
+              core.setFailed(`Error getting latest NELM version: ${error.message}`);
+              return '';
+            }
+          result-encoding: string
+
+      - name: Get current NELM version
+        id: current-version
+        run: |
+          CURRENT_VERSION=$(grep "ARG NELM_VERSION=" Dockerfile | cut -d'=' -f2)
+          echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update Dockerfile if new version available
+        id: update
+        if: steps.latest-release.outputs.result != '' && steps.latest-release.outputs.result != steps.current-version.outputs.current-version
+        run: |
+          LATEST_VERSION=${{ steps.latest-release.outputs.result }}
+          sed -i "s/ARG NELM_VERSION=.*/ARG NELM_VERSION=${LATEST_VERSION}/" Dockerfile
+          echo "updated=true" >> $GITHUB_OUTPUT
+          echo "new-version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        if: steps.update.outputs.updated == 'true'
+        id: create-pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: update NELM version to ${{ steps.update.outputs.new-version }}"
+          title: "Update NELM version to ${{ steps.update.outputs.new-version }}"
+          body: |
+            This PR updates the NELM version from ${{ steps.current-version.outputs.current-version }} to ${{ steps.update.outputs.new-version }}.
+
+            Automated update triggered by a new NELM release.
+          branch: update-nelm-version
+          base: main
+          delete-branch: true
+
+  auto-merge:
+    needs: check-update
+    if: needs.check-update.outputs.updated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for build-and-publish workflow
+        uses: lewagon/wait-on-check-action@v1.3.3
+        with:
+          ref: update-nelm-version
+          check-name: Build and Push Multiarch Docker Image
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 30
+
+      - name: Auto-merge PR
+        id: merge
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: ${{ needs.check-update.outputs.pr_number }},
+                merge_method: 'merge'
+              });
+              return 'success';
+            } catch (error) {
+              core.setFailed(`Failed to merge PR: ${error.message}`);
+              return 'failed';
+            }
+          result-encoding: string
+
+      - name: Checkout main branch
+        if: steps.merge.outputs.result == 'success'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Create and push tag
+        if: steps.merge.outputs.result == 'success'
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git tag ${{ needs.check-update.outputs.new-version }}
+          git push origin ${{ needs.check-update.outputs.new-version }}
