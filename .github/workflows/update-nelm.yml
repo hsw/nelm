@@ -74,14 +74,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for build-and-publish workflow
-        uses: lewagon/wait-on-check-action@v1.3.3
+        id: wait-for-workflow
+        uses: actions/github-script@v7
         with:
-          ref: update-nelm-version
-          check-name: Build and Push Multiarch Docker Image
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 30
+          github-token: ${{ secrets.PAT_GITHUB }}
+          script: |
+            const branch = "update-nelm-version";
+            const workflowName = "Build and Push Multiarch Docker Image";
+            
+            // Function to sleep for specified ms
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            
+            // Function to get workflow runs
+            async function getWorkflowRuns() {
+              const runs = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: branch,
+                status: 'completed',
+                per_page: 30
+              });
+              return runs.data.workflow_runs.filter(run => run.name === workflowName);
+            }
+            
+            console.log(`Waiting for "${workflowName}" workflow to complete on branch "${branch}"...`);
+            
+            // Poll until workflow completes or timeout
+            const timeout = Date.now() + (15 * 60 * 1000); // 15 minutes timeout
+            while (Date.now() < timeout) {
+              const runs = await getWorkflowRuns();
+              
+              if (runs.length > 0) {
+                const latestRun = runs[0]; // Most recent run first
+                
+                if (latestRun.conclusion === 'success') {
+                  console.log(`✅ Workflow "${workflowName}" completed successfully!`);
+                  return true;
+                } else if (latestRun.conclusion) {
+                  console.log(`❌ Workflow "${workflowName}" completed with status: ${latestRun.conclusion}`);
+                  core.setFailed(`Workflow "${workflowName}" did not succeed. Status: ${latestRun.conclusion}`);
+                  return false;
+                }
+              }
+              
+              console.log("Workflow still running or not found, waiting 30 seconds...");
+              await sleep(30000); // Wait 30 seconds before checking again
+            }
+            
+            core.setFailed("Timed out waiting for workflow run to complete");
+            return false;
 
       - name: Auto-merge PR
+        if: steps.wait-for-workflow.outputs.result == 'true'
         id: merge
         uses: actions/github-script@v7
         with:
