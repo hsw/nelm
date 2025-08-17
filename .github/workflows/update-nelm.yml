@@ -40,6 +40,7 @@ jobs:
       - name: Get current NELM version
         id: current-version
         run: |
+          set -eo pipefail
           CURRENT_VERSION=$(grep "ARG NELM_VERSION=" Dockerfile | cut -d'=' -f2)
           echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
@@ -64,6 +65,8 @@ jobs:
             This PR updates the NELM version from ${{ steps.current-version.outputs.current-version }} to ${{ steps.update.outputs.new-version }}.
             
             Automated update triggered by a new NELM release.
+          assignees: ${{ github.repository_owner }}
+          labels: automerge,github-actions
           branch: update-nelm-version
           base: main
           delete-branch: true
