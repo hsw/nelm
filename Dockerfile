@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM alpine:3 AS downloader
+FROM alpine:3.22 AS downloader
 
 ARG NELM_VERSION=1.12.2
 ARG TARGETARCH
@@ -7,16 +7,27 @@ ARG TARGETARCH
 WORKDIR /tmp
 
 RUN apk add --no-cache curl gnupg \
-    && curl -fsSLO "https://tuf.nelm.sh/targets/releases/${NELM_VERSION}/linux-${TARGETARCH}/bin/nelm" \
+    && curl -fsSL https://raw.githubusercontent.com/werf/nelm/refs/heads/main/nelm.asc | gpg --import
+
+RUN curl -fsSLO "https://tuf.nelm.sh/targets/releases/${NELM_VERSION}/linux-${TARGETARCH}/bin/nelm" \
     -O "https://tuf.nelm.sh/targets/signatures/${NELM_VERSION}/linux-${TARGETARCH}/bin/nelm.sig" \
-    && curl -fsSL https://raw.githubusercontent.com/werf/nelm/refs/heads/main/nelm.asc | gpg --import \
     && gpg --verify nelm.sig nelm \
-    && chmod +x nelm \
-    && unset NELM_VERSION \
+    && chmod +x nelm
+
+RUN unset NELM_VERSION \
     && ./nelm version  # Smoke test
 
-FROM alpine:3
+RUN KUBE_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt) && \
+    echo "Using kubectl version: ${KUBE_VERSION}" \
+    && curl -sSLO "https://dl.k8s.io/release/${KUBE_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
+    -O "https://dl.k8s.io/release/${KUBE_VERSION}/bin/linux/${TARGETARCH}/kubectl.sha256" \
+    && echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c \
+    && chmod +x kubectl
 
-COPY --from=downloader /tmp/nelm /usr/local/bin/nelm
+RUN ./kubectl version --client # Smoke test
+
+FROM alpine:3.22
+
+COPY --from=downloader /tmp/nelm /tmp/kubectl /usr/local/bin/
 
 CMD ["/usr/local/bin/nelm"]
