@@ -21,7 +21,7 @@ jobs:
 
       - name: Get latest NELM release
         id: latest-release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             try {
@@ -78,7 +78,7 @@ jobs:
     steps:
       - name: Wait for build-and-publish workflow
         id: wait-for-workflow
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_GITHUB }}
           script: |
@@ -130,7 +130,7 @@ jobs:
       - name: Auto-merge PR
         if: steps.wait-for-workflow.outputs.result == 'true'
         id: merge
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_GITHUB }}
           script: |
