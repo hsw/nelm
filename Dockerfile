@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.4
 FROM alpine:3.22 AS downloader
 
-ARG NELM_VERSION=1.12.2
+ARG NELM_VERSION=1.13.0
 ARG TARGETARCH
 
 WORKDIR /tmp
