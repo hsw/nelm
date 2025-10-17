@@ -44,9 +44,42 @@ jobs:
           CURRENT_VERSION=$(grep "ARG NELM_VERSION=" Dockerfile | cut -d'=' -f2)
           echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
+      - name: Verify NELM release files are available
+        id: verify-files
+        if: steps.latest-release.outputs.result != '' && steps.latest-release.outputs.result != steps.current-version.outputs.current-version
+        run: |
+          LATEST_VERSION=${{ steps.latest-release.outputs.result }}
+          echo "Checking if NELM ${LATEST_VERSION} files are available..."
+          
+          # Check both architectures
+          for ARCH in amd64 arm64; do
+            echo "Checking ${ARCH}..."
+            NELM_URL="https://tuf.nelm.sh/targets/releases/${LATEST_VERSION}/linux-${ARCH}/bin/nelm"
+            SIG_URL="https://tuf.nelm.sh/targets/signatures/${LATEST_VERSION}/linux-${ARCH}/bin/nelm.sig"
+            
+            # Check nelm binary
+            if ! curl -fsSL --head "${NELM_URL}" > /dev/null 2>&1; then
+              echo "❌ NELM binary not available for ${ARCH}: ${NELM_URL}"
+              echo "files-ready=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            # Check signature file
+            if ! curl -fsSL --head "${SIG_URL}" > /dev/null 2>&1; then
+              echo "❌ NELM signature not available for ${ARCH}: ${SIG_URL}"
+              echo "files-ready=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            echo "✅ Files available for ${ARCH}"
+          done
+          
+          echo "✅ All release files are available"
+          echo "files-ready=true" >> $GITHUB_OUTPUT
+
       - name: Update Dockerfile if new version available
         id: update
-        if: steps.latest-release.outputs.result != '' && steps.latest-release.outputs.result != steps.current-version.outputs.current-version
+        if: steps.latest-release.outputs.result != '' && steps.latest-release.outputs.result != steps.current-version.outputs.current-version && steps.verify-files.outputs.files-ready == 'true'
         run: |
           LATEST_VERSION=${{ steps.latest-release.outputs.result }}
           sed -i "s/ARG NELM_VERSION=.*/ARG NELM_VERSION=${LATEST_VERSION}/" Dockerfile
@@ -94,7 +127,6 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 branch: branch,
-                status: 'completed',
                 per_page: 30
               });
               return runs.data.workflow_runs.filter(run => run.name === workflowName);
@@ -112,11 +144,11 @@ jobs:
                 
                 if (latestRun.conclusion === 'success') {
                   console.log(`✅ Workflow "${workflowName}" completed successfully!`);
-                  return true;
+                  return 'success';
                 } else if (latestRun.conclusion) {
                   console.log(`❌ Workflow "${workflowName}" completed with status: ${latestRun.conclusion}`);
                   core.setFailed(`Workflow "${workflowName}" did not succeed. Status: ${latestRun.conclusion}`);
-                  return false;
+                  return 'failed';
                 }
               }
               
@@ -125,10 +157,11 @@ jobs:
             }
             
             core.setFailed("Timed out waiting for workflow run to complete");
-            return false;
+            return 'timeout';
+          result-encoding: string
 
       - name: Auto-merge PR
-        if: steps.wait-for-workflow.outputs.result == 'true'
+        if: steps.wait-for-workflow.outputs.result == 'success'
         id: merge
         uses: actions/github-script@v8
         with:
