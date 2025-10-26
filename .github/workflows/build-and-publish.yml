@@ -93,7 +93,7 @@ jobs:
             if [ -n "$QUALITY_LABELS" ]; then
               IFS=',' read -ra LABELS <<< "$QUALITY_LABELS"
               for label in "${LABELS[@]}"; do
-                label=$(echo "$label" | xargs) # trim whitespace
+                label=$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') # trim whitespace
                 TAGS="${TAGS}${GHCR_IMAGE}:${label},"
                 TAGS="${TAGS}${DOCKERHUB_IMAGE}:${label},"
               done
