@@ -4,195 +4,172 @@ on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      max_builds:
+        description: 'Maximum number of versions to build in one run'
+        required: false
+        type: number
+        default: 10
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
-  check-update:
+  discover-releases:
     runs-on: ubuntu-latest
     outputs:
-      pr_number: ${{ steps.create-pr.outputs.pull-request-number }}
-      updated: ${{ steps.update.outputs.updated }}
-      new-version: ${{ steps.update.outputs.new-version }}
+      releases: ${{ steps.get-releases.outputs.releases }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Get latest NELM release
-        id: latest-release
+      - name: Get all stable NELM releases
+        id: get-releases
         uses: actions/github-script@v8
         with:
           script: |
+            const maxBuilds = parseInt(context.payload.inputs?.max_builds) || 10;
+
             try {
-              const response = await github.rest.repos.getLatestRelease({
+              // Get all releases from werf/nelm
+              const releases = await github.rest.repos.listReleases({
                 owner: 'werf',
-                repo: 'nelm'
+                repo: 'nelm',
+                per_page: 100
               });
-              const latestVersion = response.data.tag_name.replace(/^v/, '');
-              return latestVersion;
+
+              // Helper function to parse semver
+              function parseSemver(version) {
+                // Ensure any leading 'v' is removed
+                const cleanVersion = version.replace(/^v/, '');
+                const parts = cleanVersion.split('.').map(Number);
+                return {
+                  major: parts[0] || 0,
+                  minor: parts[1] || 0,
+                  patch: parts[2] || 0
+                };
+              }
+
+              // Helper function to compare versions
+              function compareVersions(a, b) {
+                const vA = parseSemver(a);
+                const vB = parseSemver(b);
+
+                if (vA.major !== vB.major) return vB.major - vA.major;
+                if (vA.minor !== vB.minor) return vB.minor - vA.minor;
+                return vB.patch - vA.patch;
+              }
+
+              // Filter out pre-releases (alpha, beta) and extract stable releases
+              const stableReleases = releases.data
+                .filter(release => !release.prerelease)
+                .map(release => {
+                  const version = release.tag_name.replace(/^v/, '');
+
+                  // Extract quality labels from release name
+                  // Format: "v1.12.2 [ea,stable,rock-solid]"
+                  const labelMatch = release.name.match(/\[(.*?)\]/);
+                  const qualityLabels = labelMatch ? labelMatch[1] : '';
+
+                  return {
+                    version: version,
+                    quality_labels: qualityLabels,
+                    published_at: release.published_at
+                  };
+                })
+                .sort((a, b) => compareVersions(a.version, b.version))
+                .slice(0, maxBuilds);
+
+              // Mark the latest version (first after sorting)
+              if (stableReleases.length > 0) {
+                stableReleases[0].is_latest = true;
+              }
+
+              console.log(`Found ${stableReleases.length} stable releases:`);
+              stableReleases.forEach(r => {
+                const latestMark = r.is_latest ? ' [LATEST - will get major tag]' : '';
+                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]${latestMark}`);
+              });
+
+              return stableReleases;
             } catch (error) {
-              core.setFailed(`Error getting latest NELM version: ${error.message}`);
-              return '';
+              core.setFailed(`Error getting NELM releases: ${error.message}`);
+              return [];
             }
-          result-encoding: string
+          result-encoding: json
 
-      - name: Get current NELM version
-        id: current-version
-        run: |
-          set -eo pipefail
-          CURRENT_VERSION=$(grep "ARG NELM_VERSION=" Dockerfile | cut -d'=' -f2)
-          echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
+  build-releases:
+    needs: discover-releases
+    if: needs.discover-releases.outputs.releases != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        release: ${{ fromJson(needs.discover-releases.outputs.releases) }}
+      fail-fast: false
+      max-parallel: 3
+    steps:
       - name: Verify NELM release files are available
         id: verify-files
-        if: steps.latest-release.outputs.result != '' && steps.latest-release.outputs.result != steps.current-version.outputs.current-version
         run: |
-          LATEST_VERSION=${{ steps.latest-release.outputs.result }}
-          echo "Checking if NELM ${LATEST_VERSION} files are available..."
-          
+          VERSION="${{ matrix.release.version }}"
+          echo "Checking if NELM ${VERSION} files are available..."
+
           # Check both architectures
           for ARCH in amd64 arm64; do
             echo "Checking ${ARCH}..."
-            NELM_URL="https://tuf.nelm.sh/targets/releases/${LATEST_VERSION}/linux-${ARCH}/bin/nelm"
-            SIG_URL="https://tuf.nelm.sh/targets/signatures/${LATEST_VERSION}/linux-${ARCH}/bin/nelm.sig"
-            
+            NELM_URL="https://tuf.nelm.sh/targets/releases/${VERSION}/linux-${ARCH}/bin/nelm"
+            SIG_URL="https://tuf.nelm.sh/targets/signatures/${VERSION}/linux-${ARCH}/bin/nelm.sig"
+
             # Check nelm binary
             if ! curl -fsSL --head "${NELM_URL}" > /dev/null 2>&1; then
               echo "❌ NELM binary not available for ${ARCH}: ${NELM_URL}"
               echo "files-ready=false" >> $GITHUB_OUTPUT
               exit 0
             fi
-            
+
             # Check signature file
             if ! curl -fsSL --head "${SIG_URL}" > /dev/null 2>&1; then
               echo "❌ NELM signature not available for ${ARCH}: ${SIG_URL}"
               echo "files-ready=false" >> $GITHUB_OUTPUT
               exit 0
             fi
-            
+
             echo "✅ Files available for ${ARCH}"
           done
-          
+
           echo "✅ All release files are available"
           echo "files-ready=true" >> $GITHUB_OUTPUT
 
-      - name: Update Dockerfile if new version available
-        id: update
-        if: steps.latest-release.outputs.result != '' && steps.latest-release.outputs.result != steps.current-version.outputs.current-version && steps.verify-files.outputs.files-ready == 'true'
-        run: |
-          LATEST_VERSION=${{ steps.latest-release.outputs.result }}
-          sed -i "s/ARG NELM_VERSION=.*/ARG NELM_VERSION=${LATEST_VERSION}/" Dockerfile
-          echo "updated=true" >> $GITHUB_OUTPUT
-          echo "new-version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Create Pull Request
-        if: steps.update.outputs.updated == 'true'
-        id: create-pr
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.PAT_GITHUB }}
-          commit-message: "chore: update NELM version to ${{ steps.update.outputs.new-version }}"
-          title: "Update NELM version to ${{ steps.update.outputs.new-version }}"
-          body: |
-            This PR updates the NELM version from ${{ steps.current-version.outputs.current-version }} to ${{ steps.update.outputs.new-version }}.
-            
-            Automated update triggered by a new NELM release.
-          assignees: ${{ github.repository_owner }}
-          labels: automerge,github-actions
-          branch: update-nelm-version
-          base: main
-          delete-branch: true
-
-  auto-merge:
-    needs: check-update
-    if: needs.check-update.outputs.updated == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for build-and-publish workflow
-        id: wait-for-workflow
+      - name: Trigger build for NELM version
+        if: steps.verify-files.outputs.files-ready == 'true'
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.PAT_GITHUB }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const branch = "update-nelm-version";
-            const workflowName = "Build and Push Multiarch Docker Image";
-            
-            // Function to sleep for specified ms
-            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-            
-            // Function to get workflow runs
-            async function getWorkflowRuns() {
-              const runs = await github.rest.actions.listWorkflowRunsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                branch: branch,
-                per_page: 30
-              });
-              return runs.data.workflow_runs.filter(run => run.name === workflowName);
-            }
-            
-            console.log(`Waiting for "${workflowName}" workflow to complete on branch "${branch}"...`);
-            
-            // Poll until workflow completes or timeout
-            const timeout = Date.now() + (15 * 60 * 1000); // 15 minutes timeout
-            while (Date.now() < timeout) {
-              const runs = await getWorkflowRuns();
-              
-              if (runs.length > 0) {
-                const latestRun = runs[0]; // Most recent run first
-                
-                if (latestRun.conclusion === 'success') {
-                  console.log(`✅ Workflow "${workflowName}" completed successfully!`);
-                  return 'success';
-                } else if (latestRun.conclusion) {
-                  console.log(`❌ Workflow "${workflowName}" completed with status: ${latestRun.conclusion}`);
-                  core.setFailed(`Workflow "${workflowName}" did not succeed. Status: ${latestRun.conclusion}`);
-                  return 'failed';
-                }
+            const version = '${{ matrix.release.version }}';
+            const qualityLabels = '${{ matrix.release.quality_labels }}';
+            const isLatest = '${{ matrix.release.is_latest }}' === 'true';
+
+            console.log(`Triggering build for NELM ${version}`);
+            console.log(`Quality labels: ${qualityLabels || 'none'}`);
+            console.log(`Is latest: ${isLatest}`);
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-and-publish.yml',
+              ref: context.ref || 'main',
+              inputs: {
+                nelm_version: version,
+                quality_labels: qualityLabels,
+                is_latest: isLatest.toString()
               }
-              
-              console.log("Workflow still running or not found, waiting 30 seconds...");
-              await sleep(30000); // Wait 30 seconds before checking again
-            }
-            
-            core.setFailed("Timed out waiting for workflow run to complete");
-            return 'timeout';
-          result-encoding: string
+            });
 
-      - name: Auto-merge PR
-        if: steps.wait-for-workflow.outputs.result == 'success'
-        id: merge
-        uses: actions/github-script@v8
-        with:
-          github-token: ${{ secrets.PAT_GITHUB }}
-          script: |
-            try {
-              await github.rest.pulls.merge({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: ${{ needs.check-update.outputs.pr_number }},
-                merge_method: 'merge'
-              });
-              return 'success';
-            } catch (error) {
-              core.setFailed(`Failed to merge PR: ${error.message}`);
-              return 'failed';
-            }
-          result-encoding: string
+            console.log(`✅ Build triggered for version ${version}`);
 
-      - name: Checkout main branch
-        if: steps.merge.outputs.result == 'success'
-        uses: actions/checkout@v5
-        with:
-          ref: main
-          fetch-depth: 0
-          token: ${{ secrets.PAT_GITHUB }}
-
-      - name: Create and push tag
-        if: steps.merge.outputs.result == 'success'
+      - name: Build summary
+        if: always()
         run: |
-          git config --global user.name 'GitHub Actions'
-          git config --global user.email 'actions@github.com'
-          git tag ${{ needs.check-update.outputs.new-version }}
-          git push origin ${{ needs.check-update.outputs.new-version }}
+          echo "## Build Request Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ matrix.release.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Quality Labels: ${{ matrix.release.quality_labels || 'none' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Files Available: ${{ steps.verify-files.outputs.files-ready }}" >> $GITHUB_STEP_SUMMARY
