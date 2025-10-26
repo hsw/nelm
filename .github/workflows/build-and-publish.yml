@@ -49,6 +49,10 @@ jobs:
             echo "build_arg=NELM_VERSION=${{ inputs.nelm_version }}" >> $GITHUB_OUTPUT
           else
             VERSION=$(grep "ARG NELM_VERSION=" Dockerfile | cut -d'=' -f2)
+            if [ -z "$VERSION" ]; then
+              echo "Error: Could not extract NELM_VERSION from Dockerfile"
+              exit 1
+            fi
             echo "version=${VERSION}" >> $GITHUB_OUTPUT
             echo "build_arg=" >> $GITHUB_OUTPUT
           fi
