@@ -7,6 +7,16 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      nelm_version:
+        description: 'NELM version to build (e.g., 1.12.2)'
+        required: true
+        type: string
+      quality_labels:
+        description: 'Comma-separated quality labels (e.g., ea,stable,rock-solid)'
+        required: false
+        type: string
+        default: ''
 
 env:
   REGISTRY: ghcr.io
@@ -26,6 +36,62 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Determine NELM version
+        id: nelm-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.nelm_version }}" >> $GITHUB_OUTPUT
+            echo "build_arg=NELM_VERSION=${{ inputs.nelm_version }}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(grep "ARG NELM_VERSION=" Dockerfile | cut -d'=' -f2)
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "build_arg=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Docker tags
+        id: tags
+        run: |
+          VERSION="${{ steps.nelm-version.outputs.version }}"
+          QUALITY_LABELS="${{ inputs.quality_labels }}"
+
+          # Base images
+          GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          DOCKERHUB_IMAGE="hsww/nelm"
+
+          TAGS=""
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # For manual builds: version, major.minor, and quality labels
+            MAJOR_MINOR=$(echo "$VERSION" | cut -d'.' -f1,2)
+
+            # Add full version tags
+            TAGS="${TAGS}${GHCR_IMAGE}:${VERSION},"
+            TAGS="${TAGS}${DOCKERHUB_IMAGE}:${VERSION},"
+
+            # Add major.minor tags
+            TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR_MINOR},"
+            TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
+
+            # Add quality label tags
+            if [ -n "$QUALITY_LABELS" ]; then
+              IFS=',' read -ra LABELS <<< "$QUALITY_LABELS"
+              for label in "${LABELS[@]}"; do
+                label=$(echo "$label" | xargs) # trim whitespace
+                TAGS="${TAGS}${GHCR_IMAGE}:${label},"
+                TAGS="${TAGS}${DOCKERHUB_IMAGE}:${label},"
+              done
+            fi
+
+            # Remove trailing comma
+            TAGS="${TAGS%,}"
+          else
+            # For git events: use metadata-action generated tags
+            TAGS="${{ steps.meta.outputs.tags }}"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Generated tags: ${TAGS}"
+
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -43,6 +109,7 @@ jobs:
 
       - name: Docker meta
         id: meta
+        if: github.event_name != 'workflow_dispatch'
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -68,8 +135,10 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ${{ steps.nelm-version.outputs.build_arg }}
 
       - name: Generate artifact attestation
         if: github.event_name != 'pull_request'
