@@ -26,7 +26,7 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const maxBuilds = context.payload.inputs?.max_builds || 10;
+            const maxBuilds = parseInt(context.payload.inputs?.max_builds) || 10;
 
             try {
               // Get all releases from werf/nelm
