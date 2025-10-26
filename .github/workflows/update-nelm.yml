@@ -36,10 +36,29 @@ jobs:
                 per_page: 100
               });
 
+              // Helper function to parse semver
+              function parseSemver(version) {
+                const parts = version.split('.').map(Number);
+                return {
+                  major: parts[0] || 0,
+                  minor: parts[1] || 0,
+                  patch: parts[2] || 0
+                };
+              }
+
+              // Helper function to compare versions
+              function compareVersions(a, b) {
+                const vA = parseSemver(a);
+                const vB = parseSemver(b);
+
+                if (vA.major !== vB.major) return vB.major - vA.major;
+                if (vA.minor !== vB.minor) return vB.minor - vA.minor;
+                return vB.patch - vA.patch;
+              }
+
               // Filter out pre-releases (alpha, beta) and extract stable releases
               const stableReleases = releases.data
                 .filter(release => !release.prerelease)
-                .slice(0, maxBuilds)
                 .map(release => {
                   const version = release.tag_name.replace(/^v/, '');
 
@@ -53,11 +72,19 @@ jobs:
                     quality_labels: qualityLabels,
                     published_at: release.published_at
                   };
-                });
+                })
+                .sort((a, b) => compareVersions(a.version, b.version))
+                .slice(0, maxBuilds);
+
+              // Mark the latest version (first after sorting)
+              if (stableReleases.length > 0) {
+                stableReleases[0].is_latest = true;
+              }
 
               console.log(`Found ${stableReleases.length} stable releases:`);
               stableReleases.forEach(r => {
-                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]`);
+                const latestMark = r.is_latest ? ' [LATEST - will get major tag]' : '';
+                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]${latestMark}`);
               });
 
               return stableReleases;
@@ -117,9 +144,11 @@ jobs:
           script: |
             const version = '${{ matrix.release.version }}';
             const qualityLabels = '${{ matrix.release.quality_labels }}';
+            const isLatest = '${{ matrix.release.is_latest }}' === 'true';
 
             console.log(`Triggering build for NELM ${version}`);
             console.log(`Quality labels: ${qualityLabels || 'none'}`);
+            console.log(`Is latest: ${isLatest}`);
 
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
@@ -128,7 +157,8 @@ jobs:
               ref: context.ref || 'main',
               inputs: {
                 nelm_version: version,
-                quality_labels: qualityLabels
+                quality_labels: qualityLabels,
+                is_latest: isLatest.toString()
               }
             });
 

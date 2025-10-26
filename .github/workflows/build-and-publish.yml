@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: ''
+      is_latest:
+        description: 'Is this the latest stable version? (adds major tag like "1")'
+        required: false
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -53,6 +58,7 @@ jobs:
         run: |
           VERSION="${{ steps.nelm-version.outputs.version }}"
           QUALITY_LABELS="${{ inputs.quality_labels }}"
+          IS_LATEST="${{ inputs.is_latest }}"
 
           # Base images
           GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
@@ -62,6 +68,7 @@ jobs:
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # For manual builds: version, major.minor, and quality labels
+            MAJOR=$(echo "$VERSION" | cut -d'.' -f1)
             MAJOR_MINOR=$(echo "$VERSION" | cut -d'.' -f1,2)
 
             # Add full version tags
@@ -71,6 +78,12 @@ jobs:
             # Add major.minor tags
             TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR_MINOR},"
             TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
+
+            # Add major tag only for the latest version
+            if [ "$IS_LATEST" = "true" ]; then
+              TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR},"
+              TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR},"
+            fi
 
             # Add quality label tags
             if [ -n "$QUALITY_LABELS" ]; then
