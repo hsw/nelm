@@ -38,7 +38,9 @@ jobs:
 
               // Helper function to parse semver
               function parseSemver(version) {
-                const parts = version.split('.').map(Number);
+                // Ensure any leading 'v' is removed
+                const cleanVersion = version.replace(/^v/, '');
+                const parts = cleanVersion.split('.').map(Number);
                 return {
                   major: parts[0] || 0,
                   minor: parts[1] || 0,
