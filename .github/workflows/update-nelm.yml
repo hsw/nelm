@@ -83,6 +83,11 @@ jobs:
                 stableReleases[0].is_latest = true;
               }
 
+              if (stableReleases.length === 0) {
+                console.log('No stable releases found');
+                return [];
+              }
+
               console.log(`Found ${stableReleases.length} stable releases:`);
               stableReleases.forEach(r => {
                 const latestMark = r.is_latest ? ' [LATEST - will get major tag]' : '';
@@ -91,14 +96,15 @@ jobs:
 
               return stableReleases;
             } catch (error) {
-              core.setFailed(`Error getting NELM releases: ${error.message}`);
+              core.warning(`Error getting NELM releases: ${error.message}`);
+              console.log('Returning empty array due to error');
               return [];
             }
           result-encoding: json
 
   build-releases:
     needs: discover-releases
-    if: needs.discover-releases.outputs.releases != '[]'
+    if: needs.discover-releases.outputs.releases != '' && needs.discover-releases.outputs.releases != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
