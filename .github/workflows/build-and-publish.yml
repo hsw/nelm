@@ -59,6 +59,7 @@ jobs:
 
       - name: Generate Docker tags
         id: tags
+        if: github.event_name == 'workflow_dispatch'
         run: |
           VERSION="${{ steps.nelm-version.outputs.version }}"
           QUALITY_LABELS="${{ inputs.quality_labels }}"
@@ -70,41 +71,36 @@ jobs:
 
           TAGS=""
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # For manual builds: version, major.minor, and quality labels
-            MAJOR=$(echo "$VERSION" | cut -d'.' -f1)
-            MAJOR_MINOR=$(echo "$VERSION" | cut -d'.' -f1,2)
+          # For manual builds: version, major.minor, and quality labels
+          MAJOR=$(echo "$VERSION" | cut -d'.' -f1)
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d'.' -f1,2)
 
-            # Add full version tags
-            TAGS="${TAGS}${GHCR_IMAGE}:${VERSION},"
-            TAGS="${TAGS}${DOCKERHUB_IMAGE}:${VERSION},"
+          # Add full version tags
+          TAGS="${TAGS}${GHCR_IMAGE}:${VERSION},"
+          TAGS="${TAGS}${DOCKERHUB_IMAGE}:${VERSION},"
 
-            # Add major.minor tags
-            TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR_MINOR},"
-            TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
+          # Add major.minor tags
+          TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR_MINOR},"
+          TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
 
-            # Add major tag only for the latest version
-            if [ "$IS_LATEST" = "true" ]; then
-              TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR},"
-              TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR},"
-            fi
-
-            # Add quality label tags
-            if [ -n "$QUALITY_LABELS" ]; then
-              IFS=',' read -ra LABELS <<< "$QUALITY_LABELS"
-              for label in "${LABELS[@]}"; do
-                label=$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') # trim whitespace
-                TAGS="${TAGS}${GHCR_IMAGE}:${label},"
-                TAGS="${TAGS}${DOCKERHUB_IMAGE}:${label},"
-              done
-            fi
-
-            # Remove trailing comma
-            TAGS="${TAGS%,}"
-          else
-            # For git events: use metadata-action generated tags
-            TAGS="${{ steps.meta.outputs.tags }}"
+          # Add major tag only for the latest version
+          if [ "$IS_LATEST" = "true" ]; then
+            TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR},"
+            TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR},"
           fi
+
+          # Add quality label tags
+          if [ -n "$QUALITY_LABELS" ]; then
+            IFS=',' read -ra LABELS <<< "$QUALITY_LABELS"
+            for label in "${LABELS[@]}"; do
+              label=$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') # trim whitespace
+              TAGS="${TAGS}${GHCR_IMAGE}:${label},"
+              TAGS="${TAGS}${DOCKERHUB_IMAGE}:${label},"
+            done
+          fi
+
+          # Remove trailing comma
+          TAGS="${TAGS%,}"
 
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "Generated tags: ${TAGS}"
@@ -152,7 +148,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ github.event_name == 'workflow_dispatch' && steps.tags.outputs.tags || steps.meta.outputs.tags }}
           labels: ${{ github.event_name != 'workflow_dispatch' && steps.meta.outputs.labels || '' }}
           build-args: |
             ${{ steps.nelm-version.outputs.build_arg }}
