@@ -19,7 +19,7 @@ jobs:
   discover-releases:
     runs-on: ubuntu-latest
     outputs:
-      releases: ${{ steps.get-releases.outputs.releases }}
+      releases: ${{ steps.get-releases.outputs.result }}
     steps:
       - name: Get all stable NELM releases
         id: get-releases
