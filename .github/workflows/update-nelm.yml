@@ -147,7 +147,7 @@ jobs:
                   console.log(`  ⏭️  ${release.version} - already exists, skipping`);
                 } else {
                   // Don't build versions older than newest stable if they don't exist
-                  if (newestStable && compareSemver(release.semver, newestStable.semver) < 0) {
+                  if (newestStable && compareVersions(release.version, newestStable.version) < 0) {
                     console.log(`  🚫 ${release.version} - older than stable ${newestStable.version}, skipping`);
                     continue;
                   }
