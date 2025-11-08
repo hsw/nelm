@@ -10,10 +10,14 @@ on:
         required: false
         type: number
         default: 10
+  pull_request:
+    paths:
+      - '.github/workflows/update-nelm.yml'
 
 permissions:
   contents: write
   actions: write
+  packages: read
 
 jobs:
   discover-releases:
@@ -58,35 +62,55 @@ jobs:
                 return vB.patch - vA.patch;
               }
 
-              // Helper function to check if image exists in registry
-              async function imageExists(version) {
+              // Get all existing image tags from registry (once)
+              async function getAllExistingTags() {
                 try {
-                  // Use GitHub API to check if package version exists
                   const packageName = context.repo.repo;
-                  const response = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
-                    package_type: 'container',
-                    package_name: packageName,
-                    org: context.repo.owner,
-                    per_page: 100
-                  }).catch(async () => {
-                    // If org call fails, try user-owned packages
-                    return await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
+                  const allTags = new Set();
+                  let page = 1;
+                  const perPage = 100;
+
+                  while (true) {
+                    const response = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
                       package_type: 'container',
                       package_name: packageName,
-                      username: context.repo.owner,
-                      per_page: 100
+                      org: context.repo.owner,
+                      per_page: perPage,
+                      page: page
+                    }).catch(async (orgError) => {
+                      // If org call fails, try user-owned packages
+                      return await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
+                        package_type: 'container',
+                        package_name: packageName,
+                        username: context.repo.owner,
+                        per_page: perPage,
+                        page: page
+                      });
                     });
-                  });
 
-                  // Check if any package version has this tag
-                  const versionExists = response.data.some(pkg =>
-                    pkg.metadata?.container?.tags?.includes(version)
-                  );
+                    // Collect all tags from this page
+                    response.data.forEach(pkg => {
+                      const tags = pkg.metadata?.container?.tags || [];
+                      tags.forEach(tag => allTags.add(tag));
+                    });
 
-                  return versionExists;
+                    console.log(`  Fetched page ${page}: ${response.data.length} package versions, total tags so far: ${allTags.size}`);
+
+                    // Stop if we got less than perPage (last page)
+                    if (response.data.length < perPage) break;
+                    page++;
+
+                    // Safety limit to prevent infinite loop
+                    if (page > 10) {
+                      console.log('  Warning: Reached page limit, there may be more versions');
+                      break;
+                    }
+                  }
+
+                  return allTags;
                 } catch (error) {
-                  console.log(`  Could not check if ${version} exists: ${error.message}`);
-                  return false; // Assume doesn't exist if we can't check
+                  console.log(`  Could not fetch existing tags: ${error.message}`);
+                  return new Set(); // Return empty set on error
                 }
               }
 
@@ -135,6 +159,11 @@ jobs:
               );
               console.log(`Newest stable version: ${newestStable ? newestStable.version : 'none found'}`);
 
+              // Get all existing tags from registry (once, with pagination)
+              console.log('Fetching existing image tags from registry...');
+              const existingTags = await getAllExistingTags();
+              console.log(`Found ${existingTags.size} existing tags in registry\n`);
+
               // Filter out already built images and limit to maxBuilds
               console.log('Checking which releases need to be built...');
               const releasesToBuild = [];
@@ -142,7 +171,7 @@ jobs:
               for (const release of allStableReleases) {
                 if (releasesToBuild.length >= maxBuilds) break;
 
-                const exists = await imageExists(release.version);
+                const exists = existingTags.has(release.version);
                 if (exists) {
                   console.log(`  ⏭️  ${release.version} - already exists, skipping`);
                 } else {
@@ -178,7 +207,10 @@ jobs:
 
   build-releases:
     needs: discover-releases
-    if: needs.discover-releases.outputs.releases != '' && needs.discover-releases.outputs.releases != '[]'
+    if: |
+      needs.discover-releases.outputs.releases != '' &&
+      needs.discover-releases.outputs.releases != '[]' &&
+      github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       matrix:
