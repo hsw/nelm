@@ -10,10 +10,14 @@ on:
         required: false
         type: number
         default: 10
+  pull_request:
+    paths:
+      - '.github/workflows/update-nelm.yml'
 
 permissions:
   contents: write
   actions: write
+  packages: read
 
 jobs:
   discover-releases:
@@ -185,7 +189,10 @@ jobs:
 
   build-releases:
     needs: discover-releases
-    if: needs.discover-releases.outputs.releases != '' && needs.discover-releases.outputs.releases != '[]'
+    if: |
+      needs.discover-releases.outputs.releases != '' &&
+      needs.discover-releases.outputs.releases != '[]' &&
+      github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       matrix:
