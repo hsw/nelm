@@ -60,15 +60,30 @@ jobs:
 
               // Helper function to check if image exists in registry
               async function imageExists(version) {
-                const registryUrl = `https://ghcr.io/v2/${context.repo.owner}/${context.repo.repo}/manifests/${version}`;
                 try {
-                  const response = await fetch(registryUrl, {
-                    method: 'HEAD',
-                    headers: {
-                      'Authorization': `Bearer ${process.env.GITHUB_TOKEN || ''}`
-                    }
+                  // Use GitHub API to check if package version exists
+                  const packageName = context.repo.repo;
+                  const response = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+                    package_type: 'container',
+                    package_name: packageName,
+                    org: context.repo.owner,
+                    per_page: 100
+                  }).catch(async () => {
+                    // If org call fails, try user-owned packages
+                    return await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
+                      package_type: 'container',
+                      package_name: packageName,
+                      username: context.repo.owner,
+                      per_page: 100
+                    });
                   });
-                  return response.ok;
+
+                  // Check if any package version has this tag
+                  const versionExists = response.data.some(pkg =>
+                    pkg.metadata?.container?.tags?.includes(version)
+                  );
+
+                  return versionExists;
                 } catch (error) {
                   console.log(`  Could not check if ${version} exists: ${error.message}`);
                   return false; // Assume doesn't exist if we can't check
@@ -106,10 +121,7 @@ jobs:
 
               // Mark latest in each minor branch
               Object.values(minorBranches).forEach(release => {
-                const matchingRelease = allStableReleases.find(r => r.version === release.version);
-                if (matchingRelease) {
-                  matchingRelease.is_latest_in_minor = true;
-                }
+                release.is_latest_in_minor = true;
               });
 
               // Mark the latest version overall (first after sorting)
