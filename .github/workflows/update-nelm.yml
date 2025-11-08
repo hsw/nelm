@@ -86,10 +86,12 @@ jobs:
                   console.log(`  Debug: Got ${response.data.length} package versions from API`);
                   if (response.data.length > 0) {
                     const firstPkg = response.data[0];
-                    console.log(`  Debug: First package tags: ${JSON.stringify(firstPkg.metadata?.container?.tags)}`);
+                    console.log(`  Debug: First package - name: ${firstPkg.name}, tags: ${JSON.stringify(firstPkg.metadata?.container?.tags?.slice(0, 3))}`);
                   }
 
                   // Check if any package version has this tag
+                  // Each package version in the response represents a different tag/manifest
+                  // Tags are in metadata.container.tags array
                   const versionExists = response.data.some(pkg =>
                     pkg.metadata?.container?.tags?.includes(version)
                   );
