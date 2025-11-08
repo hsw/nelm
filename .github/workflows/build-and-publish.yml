@@ -22,6 +22,11 @@ on:
         required: false
         type: boolean
         default: false
+      is_latest_in_minor:
+        description: 'Is this the latest patch in minor branch? (adds major.minor tag like "1.16")'
+        required: false
+        type: boolean
+        default: true
 
 env:
   REGISTRY: ghcr.io
@@ -64,6 +69,7 @@ jobs:
           VERSION="${{ steps.nelm-version.outputs.version }}"
           QUALITY_LABELS="${{ inputs.quality_labels }}"
           IS_LATEST="${{ inputs.is_latest }}"
+          IS_LATEST_IN_MINOR="${{ inputs.is_latest_in_minor }}"
 
           # Base images
           GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
@@ -75,15 +81,17 @@ jobs:
           MAJOR=$(echo "$VERSION" | cut -d'.' -f1)
           MAJOR_MINOR=$(echo "$VERSION" | cut -d'.' -f1,2)
 
-          # Add full version tags
+          # Add full version tags (always)
           TAGS="${TAGS}${GHCR_IMAGE}:${VERSION},"
           TAGS="${TAGS}${DOCKERHUB_IMAGE}:${VERSION},"
 
-          # Add major.minor tags
-          TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR_MINOR},"
-          TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
+          # Add major.minor tags only for the latest patch in this minor branch
+          if [ "$IS_LATEST_IN_MINOR" = "true" ]; then
+            TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR_MINOR},"
+            TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
+          fi
 
-          # Add major tag only for the latest version
+          # Add major tag only for the latest version overall
           if [ "$IS_LATEST" = "true" ]; then
             TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR},"
             TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR},"

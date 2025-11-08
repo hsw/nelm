@@ -58,8 +58,25 @@ jobs:
                 return vB.patch - vA.patch;
               }
 
+              // Helper function to check if image exists in registry
+              async function imageExists(version) {
+                const registryUrl = `https://ghcr.io/v2/${context.repo.owner}/${context.repo.repo}/manifests/${version}`;
+                try {
+                  const response = await fetch(registryUrl, {
+                    method: 'HEAD',
+                    headers: {
+                      'Authorization': `Bearer ${process.env.GITHUB_TOKEN || ''}`
+                    }
+                  });
+                  return response.ok;
+                } catch (error) {
+                  console.log(`  Could not check if ${version} exists: ${error.message}`);
+                  return false; // Assume doesn't exist if we can't check
+                }
+              }
+
               // Filter out pre-releases (alpha, beta) and extract stable releases
-              const stableReleases = releases.data
+              const allStableReleases = releases.data
                 .filter(release => !release.prerelease)
                 .map(release => {
                   const version = release.tag_name.replace(/^v/, '');
@@ -75,26 +92,60 @@ jobs:
                     published_at: release.published_at
                   };
                 })
-                .sort((a, b) => compareVersions(a.version, b.version))
-                .slice(0, maxBuilds);
+                .sort((a, b) => compareVersions(a.version, b.version));
 
-              // Mark the latest version (first after sorting)
-              if (stableReleases.length > 0) {
-                stableReleases[0].is_latest = true;
+              // Group by major.minor to find latest patch version in each branch
+              const minorBranches = {};
+              allStableReleases.forEach(release => {
+                const parsed = parseSemver(release.version);
+                const minorKey = `${parsed.major}.${parsed.minor}`;
+                if (!minorBranches[minorKey] || compareVersions(release.version, minorBranches[minorKey].version) < 0) {
+                  minorBranches[minorKey] = release;
+                }
+              });
+
+              // Mark latest in each minor branch
+              Object.values(minorBranches).forEach(release => {
+                const matchingRelease = allStableReleases.find(r => r.version === release.version);
+                if (matchingRelease) {
+                  matchingRelease.is_latest_in_minor = true;
+                }
+              });
+
+              // Mark the latest version overall (first after sorting)
+              if (allStableReleases.length > 0) {
+                allStableReleases[0].is_latest = true;
               }
 
-              if (stableReleases.length === 0) {
-                console.log('No stable releases found');
+              // Filter out already built images and limit to maxBuilds
+              console.log('Checking which releases need to be built...');
+              const releasesToBuild = [];
+
+              for (const release of allStableReleases) {
+                if (releasesToBuild.length >= maxBuilds) break;
+
+                const exists = await imageExists(release.version);
+                if (exists) {
+                  console.log(`  ⏭️  ${release.version} - already exists, skipping`);
+                } else {
+                  console.log(`  ✅ ${release.version} - will build`);
+                  releasesToBuild.push(release);
+                }
+              }
+
+              if (releasesToBuild.length === 0) {
+                console.log('No new releases to build');
                 return [];
               }
 
-              console.log(`Found ${stableReleases.length} stable releases:`);
-              stableReleases.forEach(r => {
-                const latestMark = r.is_latest ? ' [LATEST - will get major tag]' : '';
-                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]${latestMark}`);
+              console.log(`\nWill build ${releasesToBuild.length} releases:`);
+              releasesToBuild.forEach(r => {
+                const latestMark = r.is_latest ? ' [LATEST - gets major tag]' : '';
+                const minorMark = r.is_latest_in_minor ? ' [LATEST in minor - gets X.Y tag]' : '';
+                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]${latestMark}${minorMark}`);
               });
 
-              return stableReleases;
+              return releasesToBuild;
             } catch (error) {
               core.warning(`Error getting NELM releases: ${error.message}`);
               console.log('Returning empty array due to error');
@@ -153,10 +204,12 @@ jobs:
             const version = '${{ matrix.release.version }}';
             const qualityLabels = '${{ matrix.release.quality_labels }}';
             const isLatest = '${{ matrix.release.is_latest }}' === 'true';
+            const isLatestInMinor = '${{ matrix.release.is_latest_in_minor }}' === 'true';
 
             console.log(`Triggering build for NELM ${version}`);
             console.log(`Quality labels: ${qualityLabels || 'none'}`);
-            console.log(`Is latest: ${isLatest}`);
+            console.log(`Is latest overall: ${isLatest}`);
+            console.log(`Is latest in minor: ${isLatestInMinor}`);
 
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
@@ -166,7 +219,8 @@ jobs:
               inputs: {
                 nelm_version: version,
                 quality_labels: qualityLabels,
-                is_latest: isLatest.toString()
+                is_latest: isLatest.toString(),
+                is_latest_in_minor: isLatestInMinor.toString()
               }
             });
 
