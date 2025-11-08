@@ -68,8 +68,9 @@ jobs:
                     package_name: packageName,
                     org: context.repo.owner,
                     per_page: 100
-                  }).catch(async () => {
+                  }).catch(async (orgError) => {
                     // If org call fails, try user-owned packages
+                    console.log(`  Debug: Org packages failed (${orgError.message}), trying user packages`);
                     return await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
                       package_type: 'container',
                       package_name: packageName,
@@ -77,6 +78,12 @@ jobs:
                       per_page: 100
                     });
                   });
+
+                  console.log(`  Debug: Got ${response.data.length} package versions from API`);
+                  if (response.data.length > 0) {
+                    const firstPkg = response.data[0];
+                    console.log(`  Debug: First package tags: ${JSON.stringify(firstPkg.metadata?.container?.tags)}`);
+                  }
 
                   // Check if any package version has this tag
                   const versionExists = response.data.some(pkg =>
