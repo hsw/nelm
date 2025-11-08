@@ -74,7 +74,6 @@ jobs:
                     per_page: 100
                   }).catch(async (orgError) => {
                     // If org call fails, try user-owned packages
-                    console.log(`  Debug: Org packages failed (${orgError.message}), trying user packages`);
                     return await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
                       package_type: 'container',
                       package_name: packageName,
@@ -83,20 +82,20 @@ jobs:
                     });
                   });
 
-                  console.log(`  Debug: Got ${response.data.length} package versions from API`);
-                  if (response.data.length > 0) {
-                    const firstPkg = response.data[0];
-                    console.log(`  Debug: First package - name: ${firstPkg.name}, tags: ${JSON.stringify(firstPkg.metadata?.container?.tags?.slice(0, 3))}`);
-                  }
-
                   // Check if any package version has this tag
                   // Each package version in the response represents a different tag/manifest
                   // Tags are in metadata.container.tags array
-                  const versionExists = response.data.some(pkg =>
+                  const foundPkg = response.data.find(pkg =>
                     pkg.metadata?.container?.tags?.includes(version)
                   );
 
-                  return versionExists;
+                  if (foundPkg) {
+                    console.log(`  Debug: Found ${version} in package with tags: ${JSON.stringify(foundPkg.metadata?.container?.tags)}`);
+                  } else {
+                    console.log(`  Debug: ${version} not found in ${response.data.length} package versions`);
+                  }
+
+                  return !!foundPkg;
                 } catch (error) {
                   console.log(`  Could not check if ${version} exists: ${error.message}`);
                   return false; // Assume doesn't exist if we can't check
