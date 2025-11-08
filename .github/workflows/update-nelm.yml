@@ -129,6 +129,12 @@ jobs:
                 allStableReleases[0].is_latest = true;
               }
 
+              // Find the newest stable/rock-solid version as a cutoff point
+              const newestStable = allStableReleases.find(r =>
+                r.quality_labels && (r.quality_labels.includes('stable') || r.quality_labels.includes('rock-solid'))
+              );
+              console.log(`Newest stable version: ${newestStable ? newestStable.version : 'none found'}`);
+
               // Filter out already built images and limit to maxBuilds
               console.log('Checking which releases need to be built...');
               const releasesToBuild = [];
@@ -140,6 +146,11 @@ jobs:
                 if (exists) {
                   console.log(`  ⏭️  ${release.version} - already exists, skipping`);
                 } else {
+                  // Don't build versions older than newest stable if they don't exist
+                  if (newestStable && compareSemver(release.semver, newestStable.semver) < 0) {
+                    console.log(`  🚫 ${release.version} - older than stable ${newestStable.version}, skipping`);
+                    continue;
+                  }
                   console.log(`  ✅ ${release.version} - will build`);
                   releasesToBuild.push(release);
                 }
