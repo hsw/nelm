@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM alpine:3.22 AS downloader
+FROM alpine:3.23 AS downloader
 
 ARG NELM_VERSION=1.12.2
 ARG TARGETARCH
@@ -26,7 +26,7 @@ RUN KUBE_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt) && \
 
 RUN ./kubectl version --client # Smoke test
 
-FROM alpine:3.22
+FROM alpine:3.23
 
 COPY --from=downloader /tmp/nelm /tmp/kubectl /usr/local/bin/
 
