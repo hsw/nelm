@@ -101,9 +101,13 @@ jobs:
                       const versionTag = tags.find(t => /^\d+\.\d+\.\d+$/.test(t));
                       if (versionTag) {
                         // Check if this image has any quality labels
+                        // If multiple images have the same label (race condition), pick the newer version
                         tags.forEach(tag => {
                           if (QUALITY_LABELS.includes(tag)) {
-                            qualityLabelToVersion[tag] = versionTag;
+                            const existing = qualityLabelToVersion[tag];
+                            if (!existing || compareVersions(versionTag, existing) < 0) {
+                              qualityLabelToVersion[tag] = versionTag;
+                            }
                           }
                         });
                       }
