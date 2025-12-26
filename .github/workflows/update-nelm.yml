@@ -63,7 +63,8 @@ jobs:
               }
 
               // Quality labels that can move between versions
-              const QUALITY_LABELS = ['ea', 'stable', 'rock-solid'];
+              // 'latest' is a synthetic label added to the newest stable version
+              const QUALITY_LABELS = ['ea', 'stable', 'rock-solid', 'latest'];
 
               // Get all existing image tags from registry with digest mapping
               async function getRegistryData() {
@@ -168,8 +169,11 @@ jobs:
               });
 
               // Mark the latest version overall (first after sorting)
+              // Also add 'latest' to its quality_labels so it gets the 'latest' tag
               if (allStableReleases.length > 0) {
                 allStableReleases[0].is_latest = true;
+                const existing = allStableReleases[0].quality_labels;
+                allStableReleases[0].quality_labels = existing ? `${existing},latest` : 'latest';
               }
 
               // Find the newest stable/rock-solid version as a cutoff point
