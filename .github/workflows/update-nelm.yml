@@ -62,11 +62,15 @@ jobs:
                 return vB.patch - vA.patch;
               }
 
-              // Get all existing image tags from registry (once)
-              async function getAllExistingTags() {
+              // Quality labels that can move between versions
+              const QUALITY_LABELS = ['ea', 'stable', 'rock-solid'];
+
+              // Get all existing image tags from registry with digest mapping
+              async function getRegistryData() {
                 try {
                   const packageName = context.repo.repo;
                   const allTags = new Set();
+                  const qualityLabelToVersion = {}; // Maps quality label -> version number
                   let page = 1;
                   const perPage = 100;
 
@@ -88,10 +92,21 @@ jobs:
                       });
                     });
 
-                    // Collect all tags from this page
+                    // Collect all tags and build quality label mapping
                     response.data.forEach(pkg => {
                       const tags = pkg.metadata?.container?.tags || [];
                       tags.forEach(tag => allTags.add(tag));
+
+                      // Find version tag (semver format) for this image
+                      const versionTag = tags.find(t => /^\d+\.\d+\.\d+$/.test(t));
+                      if (versionTag) {
+                        // Check if this image has any quality labels
+                        tags.forEach(tag => {
+                          if (QUALITY_LABELS.includes(tag)) {
+                            qualityLabelToVersion[tag] = versionTag;
+                          }
+                        });
+                      }
                     });
 
                     console.log(`  Fetched page ${page}: ${response.data.length} package versions, total tags so far: ${allTags.size}`);
@@ -107,10 +122,10 @@ jobs:
                     }
                   }
 
-                  return allTags;
+                  return { allTags, qualityLabelToVersion };
                 } catch (error) {
                   console.log(`  Could not fetch existing tags: ${error.message}`);
-                  return new Set(); // Return empty set on error
+                  return { allTags: new Set(), qualityLabelToVersion: {} };
                 }
               }
 
@@ -161,19 +176,60 @@ jobs:
 
               // Get all existing tags from registry (once, with pagination)
               console.log('Fetching existing image tags from registry...');
-              const existingTags = await getAllExistingTags();
-              console.log(`Found ${existingTags.size} existing tags in registry\n`);
+              const { allTags: existingTags, qualityLabelToVersion } = await getRegistryData();
+              console.log(`Found ${existingTags.size} existing tags in registry`);
+              console.log(`Current quality label mapping in registry:`);
+              for (const label of QUALITY_LABELS) {
+                console.log(`  ${label}: ${qualityLabelToVersion[label] || 'not set'}`);
+              }
+              console.log('');
+
+              // Build expected quality label mapping from upstream releases
+              const expectedLabelToVersion = {};
+              for (const release of allStableReleases) {
+                if (release.quality_labels) {
+                  const labels = release.quality_labels.split(',').map(l => l.trim());
+                  for (const label of labels) {
+                    if (QUALITY_LABELS.includes(label) && !expectedLabelToVersion[label]) {
+                      // First version with this label wins (list is sorted newest first)
+                      expectedLabelToVersion[label] = release.version;
+                    }
+                  }
+                }
+              }
+
+              console.log('Expected quality label mapping from upstream:');
+              for (const label of QUALITY_LABELS) {
+                console.log(`  ${label}: ${expectedLabelToVersion[label] || 'not set'}`);
+              }
+              console.log('');
 
               // Filter out already built images and limit to maxBuilds
               console.log('Checking which releases need to be built...');
               const releasesToBuild = [];
+              const versionsNeedingLabelUpdate = new Set();
+
+              // Check for quality label mismatches - these versions need rebuild
+              for (const label of QUALITY_LABELS) {
+                const currentVersion = qualityLabelToVersion[label];
+                const expectedVersion = expectedLabelToVersion[label];
+                if (expectedVersion && currentVersion !== expectedVersion) {
+                  console.log(`  🏷️  Label "${label}" needs update: ${currentVersion || 'unset'} → ${expectedVersion}`);
+                  versionsNeedingLabelUpdate.add(expectedVersion);
+                }
+              }
 
               for (const release of allStableReleases) {
                 if (releasesToBuild.length >= maxBuilds) break;
 
                 const exists = existingTags.has(release.version);
-                if (exists) {
+                const needsLabelUpdate = versionsNeedingLabelUpdate.has(release.version);
+
+                if (exists && !needsLabelUpdate) {
                   console.log(`  ⏭️  ${release.version} - already exists, skipping`);
+                } else if (exists && needsLabelUpdate) {
+                  console.log(`  🔄 ${release.version} - exists but needs label update, will rebuild`);
+                  releasesToBuild.push(release);
                 } else {
                   // Don't build versions older than newest stable if they don't exist
                   if (newestStable && compareVersions(release.version, newestStable.version) > 0) {
@@ -194,7 +250,8 @@ jobs:
               releasesToBuild.forEach(r => {
                 const latestMark = r.is_latest ? ' [LATEST - gets major tag]' : '';
                 const minorMark = r.is_latest_in_minor ? ' [LATEST in minor - gets X.Y tag]' : '';
-                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]${latestMark}${minorMark}`);
+                const labelUpdate = versionsNeedingLabelUpdate.has(r.version) ? ' [LABEL UPDATE]' : '';
+                console.log(`  - ${r.version} [${r.quality_labels || 'no labels'}]${latestMark}${minorMark}${labelUpdate}`);
               });
 
               return releasesToBuild;
