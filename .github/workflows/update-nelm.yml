@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Get all stable NELM releases
         id: get-releases
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const maxBuilds = parseInt(context.payload.inputs?.max_builds) || 10;
@@ -317,7 +317,7 @@ jobs:
 
       - name: Trigger build for NELM version
         if: steps.verify-files.outputs.files-ready == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
