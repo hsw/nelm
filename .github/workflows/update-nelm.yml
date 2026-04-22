@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases: ${{ steps.get-releases.outputs.result }}
+      all_stable_versions: ${{ steps.get-releases.outputs.all_stable_versions }}
+      quality_label_map: ${{ steps.get-releases.outputs.quality_label_map }}
     steps:
       - name: Get all stable NELM releases
         id: get-releases
@@ -249,6 +251,18 @@ jobs:
                 }
               }
 
+              // Expose data needed by the update-description job so it can
+              // rebuild the Docker Hub readme regardless of whether anything
+              // new was dispatched.
+              const compactStable = allStableReleases.map(r => ({
+                version: r.version,
+                quality_labels: r.quality_labels || '',
+                is_latest: !!r.is_latest,
+                is_latest_in_minor: !!r.is_latest_in_minor
+              }));
+              core.setOutput('all_stable_versions', JSON.stringify(compactStable));
+              core.setOutput('quality_label_map', JSON.stringify(expectedLabelToVersion));
+
               if (releasesToBuild.length === 0) {
                 console.log('No new releases to build');
                 return [];
@@ -353,3 +367,38 @@ jobs:
           echo "- Version: ${{ matrix.release.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- Quality Labels: ${{ matrix.release.quality_labels || 'none' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Files Available: ${{ steps.verify-files.outputs.files-ready }}" >> $GITHUB_STEP_SUMMARY
+
+  update-description:
+    needs: discover-releases
+    if: |
+      github.event_name != 'pull_request' &&
+      needs.discover-releases.outputs.all_stable_versions != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Generate Docker Hub readme
+        env:
+          RELEASES: ${{ needs.discover-releases.outputs.all_stable_versions }}
+          LABELS: ${{ needs.discover-releases.outputs.quality_label_map }}
+        run: |
+          mkdir -p tmp
+          node .github/scripts/generate-dockerhub-readme.js \
+            --readme README.md \
+            --releases "$RELEASES" \
+            --labels "$LABELS" \
+            --output tmp/dockerhub-readme.md
+          echo "### Docker Hub readme preview" >> $GITHUB_STEP_SUMMARY
+          echo '```markdown' >> $GITHUB_STEP_SUMMARY
+          cat tmp/dockerhub-readme.md >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Push to Docker Hub
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: hsww/nelm
+          readme-filepath: tmp/dockerhub-readme.md
+          short-description: "Nelm — Helm 3 alternative Kubernetes deployment tool (multi-arch image)"
