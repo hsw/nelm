@@ -9,6 +9,8 @@ Published to:
 
 Platforms: `linux/amd64`, `linux/arm64`. Binaries are verified against the upstream GPG signature during build.
 
+<!-- DOCKERHUB_TAGS -->
+
 ## About nelm
 
 Nelm is a Kubernetes deployment tool built on a partially rewritten Helm codebase. Compared to Helm it adds, among other things:
@@ -49,4 +51,4 @@ Default command is `nelm`. Both `nelm` and `kubectl` are on `PATH`, so any comma
 - Semver tags (`x.y.z`, `x.y`, `x`) follow nelm releases.
 - Quality labels (`ea`, `stable`, `rock-solid`, `latest`) move to newer versions automatically, matching upstream promotions.
 
-The current tag-to-version mapping is listed below and refreshed daily by CI.
+The tag-to-version mapping shown at the top of this page is refreshed daily by CI.

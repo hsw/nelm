@@ -13,6 +13,7 @@ const fs = require('fs');
 
 const QUALITY_LABELS = ['latest', 'rock-solid', 'stable', 'ea'];
 const RECENT_VERSIONS_LIMIT = 10;
+const MARKER = '<!-- DOCKERHUB_TAGS -->';
 
 function parseArgs(argv) {
   const args = {};
@@ -105,7 +106,9 @@ function main() {
   }
 
   const section = buildSection(releases, labels);
-  const content = `${readme}\n\n${section}\n`;
+  const content = readme.includes(MARKER)
+    ? `${readme.replace(MARKER, section)}\n`
+    : `${readme}\n\n${section}\n`;
 
   fs.mkdirSync(args.output.replace(/\/[^/]*$/, '') || '.', { recursive: true });
   fs.writeFileSync(args.output, content);
