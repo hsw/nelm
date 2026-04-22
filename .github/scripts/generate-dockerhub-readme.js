@@ -44,22 +44,20 @@ function labelsForVersion(release, labelMap) {
   return tags;
 }
 
-function renderLabelsTable(labelMap) {
-  const rows = QUALITY_LABELS
+function renderLabelsList(labelMap) {
+  return QUALITY_LABELS
     .filter(l => labelMap[l])
-    .map(l => `| \`${l}\` | \`${labelMap[l]}\` |`)
+    .map(l => `- \`${l}\` → \`${labelMap[l]}\``)
     .join('\n');
-  return `| Label | Current version |\n|-------|-----------------|\n${rows}`;
 }
 
-function renderVersionsTable(releases, labelMap) {
+function renderVersionsList(releases, labelMap) {
   const sorted = [...releases].sort((a, b) => compareDesc(a.version, b.version));
-  const rows = sorted.slice(0, RECENT_VERSIONS_LIMIT).map(r => {
+  return sorted.slice(0, RECENT_VERSIONS_LIMIT).map(r => {
     const extra = labelsForVersion(r, labelMap);
-    const extraStr = extra.length ? extra.map(t => `\`${t}\``).join(', ') : '—';
-    return `| \`${r.version}\` | ${extraStr} |`;
+    const extraStr = extra.length ? ` — also \`${extra.join('`, `')}\`` : '';
+    return `- \`${r.version}\`${extraStr}`;
   }).join('\n');
-  return `| Version | Also tagged as |\n|---------|----------------|\n${rows}`;
 }
 
 function buildSection(releases, labelMap) {
@@ -72,11 +70,11 @@ function buildSection(releases, labelMap) {
   parts.push('');
   parts.push('These labels follow [upstream quality promotions](https://github.com/werf/nelm/releases) and move to newer versions over time.');
   parts.push('');
-  parts.push(renderLabelsTable(labelMap));
+  parts.push(renderLabelsList(labelMap));
   parts.push('');
   parts.push('### Recent versions');
   parts.push('');
-  parts.push(renderVersionsTable(releases, labelMap));
+  parts.push(renderVersionsList(releases, labelMap));
   parts.push('');
   parts.push('### Pull examples');
   parts.push('');
