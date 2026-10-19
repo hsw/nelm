@@ -5,9 +5,14 @@
 //     --readme README.md \
 //     --releases '<json array>' \
 //     --labels '<json object>' \
+//     [--registry-tags '<json object>'] \
+//     [--building '<json array>'] \
 //     --output out.md
 // `releases` entries: {version, quality_labels, is_latest, is_latest_in_minor}
 // `labels` maps quality label -> version (e.g. {"latest":"1.22.0","stable":"1.22.0"}).
+// `registry-tags` maps version -> other tags on that image in the registry (e.g. {"1.30.2":["1.30","1"]}).
+// `building` lists releases being built in this run; their tags are predicted from upstream data.
+// When registry tags are known, only published or currently building versions are listed.
 
 const fs = require('fs');
 
@@ -45,6 +50,32 @@ function labelsForVersion(release, labelMap) {
   return tags;
 }
 
+// Order: X.Y, X, quality labels, then anything else alphabetically
+function tagRank(tag) {
+  if (/^\d+\.\d+$/.test(tag)) return 0;
+  if (/^\d+$/.test(tag)) return 1;
+  const i = QUALITY_LABELS.indexOf(tag);
+  return i >= 0 ? 2 + i : 2 + QUALITY_LABELS.length;
+}
+
+function sortTags(tags) {
+  return [...tags].sort((a, b) => tagRank(a) - tagRank(b) || a.localeCompare(b));
+}
+
+function tagsForVersion(release, labelMap, registryTags, building) {
+  if (!building.has(release.version) && registryTags[release.version]) {
+    return sortTags(registryTags[release.version]);
+  }
+  return labelsForVersion(release, labelMap);
+}
+
+// Major tags (`2`, `1`, ...) present in the registry, newest first; the latest release always gets one
+function majorTags(registryTags, labelMap) {
+  const majors = new Set(Object.values(registryTags).flat().filter(t => /^\d+$/.test(t)));
+  if (labelMap.latest) majors.add(String(parseSemver(labelMap.latest).major));
+  return [...majors].sort((a, b) => Number(b) - Number(a));
+}
+
 function renderLabelsList(labelMap) {
   return QUALITY_LABELS
     .filter(l => labelMap[l])
@@ -52,16 +83,19 @@ function renderLabelsList(labelMap) {
     .join('\n');
 }
 
-function renderVersionsList(releases, labelMap) {
-  const sorted = [...releases].sort((a, b) => compareDesc(a.version, b.version));
+function renderVersionsList(releases, labelMap, registryTags, building) {
+  const known = Object.keys(registryTags).length > 0;
+  const sorted = releases
+    .filter(r => !known || registryTags[r.version] || building.has(r.version))
+    .sort((a, b) => compareDesc(a.version, b.version));
   return sorted.slice(0, RECENT_VERSIONS_LIMIT).map(r => {
-    const extra = labelsForVersion(r, labelMap);
+    const extra = tagsForVersion(r, labelMap, registryTags, building);
     const extraStr = extra.length ? ` — also \`${extra.join('`, `')}\`` : '';
     return `- \`${r.version}\`${extraStr}`;
   }).join('\n');
 }
 
-function buildSection(releases, labelMap) {
+function buildSection(releases, labelMap, registryTags, building) {
   const parts = [];
   parts.push('## Tags');
   parts.push('');
@@ -75,13 +109,14 @@ function buildSection(releases, labelMap) {
   parts.push('');
   parts.push('### Recent versions');
   parts.push('');
-  parts.push(renderVersionsList(releases, labelMap));
+  parts.push(renderVersionsList(releases, labelMap, registryTags, building));
   parts.push('');
   parts.push('### Pull examples');
   parts.push('');
   parts.push('```shell');
   parts.push('docker pull hsww/nelm:rock-solid');
   parts.push('docker pull hsww/nelm:stable');
+  for (const major of majorTags(registryTags, labelMap)) parts.push(`docker pull hsww/nelm:${major}`);
   if (labelMap.latest) parts.push(`docker pull hsww/nelm:${labelMap.latest}`);
   parts.push('```');
   return parts.join('\n');
@@ -99,13 +134,15 @@ function main() {
   const readme = fs.readFileSync(args.readme, 'utf8').trimEnd();
   const releases = JSON.parse(args.releases);
   const labels = JSON.parse(args.labels);
+  const registryTags = JSON.parse(args['registry-tags'] || '{}');
+  const building = new Set(JSON.parse(args.building || '[]').map(r => r.version));
 
   if (!Array.isArray(releases) || releases.length === 0) {
     console.error('No releases provided; refusing to overwrite description with empty tags section');
     process.exit(1);
   }
 
-  const section = buildSection(releases, labels);
+  const section = buildSection(releases, labels, registryTags, building);
   const content = readme.includes(MARKER)
     ? `${readme.replace(MARKER, section)}\n`
     : `${readme}\n\n${section}\n`;
