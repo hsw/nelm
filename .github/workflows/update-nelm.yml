@@ -77,23 +77,22 @@ jobs:
                   let page = 1;
                   const perPage = 100;
 
+                  // Pick the org or user packages endpoint up front, so we don't log a 404 per page
+                  const ownerType = context.payload.repository?.owner?.type
+                    || (await github.rest.users.getByUsername({ username: context.repo.owner })).data.type;
+                  const isOrg = ownerType === 'Organization';
+                  console.log(`  Package owner type: ${ownerType}`);
+
                   while (true) {
-                    const response = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+                    const params = {
                       package_type: 'container',
                       package_name: packageName,
-                      org: context.repo.owner,
                       per_page: perPage,
                       page: page
-                    }).catch(async (orgError) => {
-                      // If org call fails, try user-owned packages
-                      return await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
-                        package_type: 'container',
-                        package_name: packageName,
-                        username: context.repo.owner,
-                        per_page: perPage,
-                        page: page
-                      });
-                    });
+                    };
+                    const response = isOrg
+                      ? await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({ ...params, org: context.repo.owner })
+                      : await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({ ...params, username: context.repo.owner });
 
                     // Collect all tags and build quality label mapping
                     response.data.forEach(pkg => {
