@@ -99,8 +99,8 @@ jobs:
                       const tags = pkg.metadata?.container?.tags || [];
                       tags.forEach(tag => allTags.add(tag));
 
-                      // Find version tag (semver format) for this image
-                      const versionTag = tags.find(t => /^\d+\.\d+\.\d+$/.test(t));
+                      // Find version tag (semver format, incl. pre-releases like 2.0.0-alpha.1) for this image
+                      const versionTag = tags.find(t => /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(t));
                       if (versionTag) {
                         // Check if this image has any quality labels
                         // If multiple images have the same label (race condition), pick the newer version

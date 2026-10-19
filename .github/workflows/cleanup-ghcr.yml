@@ -1,0 +1,34 @@
+name: Cleanup GHCR
+
+on:
+  schedule:
+    # Weekly, away from the daily update/build runs around 00:00 UTC
+    - cron: '0 12 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only log what would be deleted'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  packages: write
+
+concurrency:
+  group: cleanup-ghcr
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      # Removes untagged leftovers of superseded builds (old `main`, rebuilt versions).
+      # Platform/attestation manifests referenced by a tagged image are kept; tags are never touched.
+      - name: Delete untagged image versions
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          package: ${{ github.event.repository.name }}
+          delete-untagged: true
+          validate: true
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
