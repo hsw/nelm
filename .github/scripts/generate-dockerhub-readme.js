@@ -116,8 +116,8 @@ function buildSection(releases, labelMap, registryTags, building) {
   parts.push('```shell');
   parts.push('docker pull hsww/nelm:rock-solid');
   parts.push('docker pull hsww/nelm:stable');
-  for (const major of majorTags(registryTags, labelMap)) parts.push(`docker pull hsww/nelm:${major}`);
   if (labelMap.latest) parts.push(`docker pull hsww/nelm:${labelMap.latest}`);
+  for (const major of majorTags(registryTags, labelMap)) parts.push(`docker pull hsww/nelm:${major}`);
   parts.push('```');
   return parts.join('\n');
 }
