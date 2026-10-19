@@ -16,7 +16,8 @@
 
 const fs = require('fs');
 
-const QUALITY_LABELS = ['latest', 'rock-solid', 'stable', 'ea'];
+// Freshest channel first
+const QUALITY_LABELS = ['latest', 'alpha', 'beta', 'ea', 'stable', 'rock-solid'];
 const RECENT_VERSIONS_LIMIT = 10;
 const MARKER = '<!-- DOCKERHUB_TAGS -->';
 
@@ -47,15 +48,15 @@ function labelsForVersion(release, labelMap) {
   for (const label of QUALITY_LABELS) {
     if (labelMap[label] === release.version) tags.push(label);
   }
-  return tags;
+  return sortTags(tags);
 }
 
-// Order: X.Y, X, quality labels, then anything else alphabetically
+// Order: quality labels (freshest first), other names alphabetically, then X.Y, X
 function tagRank(tag) {
-  if (/^\d+\.\d+$/.test(tag)) return 0;
-  if (/^\d+$/.test(tag)) return 1;
+  if (/^\d+\.\d+$/.test(tag)) return QUALITY_LABELS.length + 1;
+  if (/^\d+$/.test(tag)) return QUALITY_LABELS.length + 2;
   const i = QUALITY_LABELS.indexOf(tag);
-  return i >= 0 ? 2 + i : 2 + QUALITY_LABELS.length;
+  return i >= 0 ? i : QUALITY_LABELS.length;
 }
 
 function sortTags(tags) {
@@ -114,8 +115,8 @@ function buildSection(releases, labelMap, registryTags, building) {
   parts.push('### Pull examples');
   parts.push('');
   parts.push('```shell');
-  parts.push('docker pull hsww/nelm:rock-solid');
   parts.push('docker pull hsww/nelm:stable');
+  parts.push('docker pull hsww/nelm:rock-solid');
   if (labelMap.latest) parts.push(`docker pull hsww/nelm:${labelMap.latest}`);
   for (const major of majorTags(registryTags, labelMap)) parts.push(`docker pull hsww/nelm:${major}`);
   parts.push('```');
