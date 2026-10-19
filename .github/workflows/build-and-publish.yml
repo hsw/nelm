@@ -17,8 +17,8 @@ on:
         required: false
         type: string
         default: ''
-      is_latest:
-        description: 'Is this the latest stable version? (adds major tag like "1")'
+      is_latest_in_major:
+        description: 'Is this the latest stable version in its major branch? (adds major tag like "1")'
         required: false
         type: boolean
         default: false
@@ -68,7 +68,7 @@ jobs:
         run: |
           VERSION="${{ steps.nelm-version.outputs.version }}"
           QUALITY_LABELS="${{ inputs.quality_labels }}"
-          IS_LATEST="${{ inputs.is_latest }}"
+          IS_LATEST_IN_MAJOR="${{ inputs.is_latest_in_major }}"
           IS_LATEST_IN_MINOR="${{ inputs.is_latest_in_minor }}"
 
           # Base images
@@ -91,8 +91,8 @@ jobs:
             TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR_MINOR},"
           fi
 
-          # Add major tag only for the latest version overall
-          if [ "$IS_LATEST" = "true" ]; then
+          # Add major tag only for the latest version in this major branch
+          if [ "$IS_LATEST_IN_MAJOR" = "true" ]; then
             TAGS="${TAGS}${GHCR_IMAGE}:${MAJOR},"
             TAGS="${TAGS}${DOCKERHUB_IMAGE}:${MAJOR},"
           fi

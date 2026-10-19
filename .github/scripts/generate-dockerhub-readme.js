@@ -8,7 +8,7 @@
 //     [--registry-tags '<json object>'] \
 //     [--building '<json array>'] \
 //     --output out.md
-// `releases` entries: {version, quality_labels, is_latest, is_latest_in_minor}
+// `releases` entries: {version, quality_labels, is_latest, is_latest_in_major, is_latest_in_minor}
 // `labels` maps quality label -> version (e.g. {"latest":"1.22.0","stable":"1.22.0"}).
 // `registry-tags` maps version -> other tags on that image in the registry (e.g. {"1.30.2":["1.30","1"]}).
 // `building` lists releases being built in this run; their tags are predicted from upstream data.
@@ -44,7 +44,7 @@ function labelsForVersion(release, labelMap) {
   const tags = [];
   const { major, minor } = parseSemver(release.version);
   if (release.is_latest_in_minor) tags.push(`${major}.${minor}`);
-  if (release.is_latest) tags.push(`${major}`);
+  if (release.is_latest_in_major) tags.push(`${major}`);
   for (const label of QUALITY_LABELS) {
     if (labelMap[label] === release.version) tags.push(label);
   }
